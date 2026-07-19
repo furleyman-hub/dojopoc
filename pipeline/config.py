@@ -81,7 +81,8 @@ IG_REFRESH_INTERVAL_DAYS = 7
 # Credentials that are only needed when actually publishing are validated
 # at use time with require_env(), not at import, so the pipeline can run
 # with PUBLISH_ENABLED=false before every credential exists:
-#   YT_CLIENT_SECRET_JSON, YT_REFRESH_TOKEN, IG_ACCESS_TOKEN, IG_USER_ID
+#   YT_CLIENT_ID, YT_CLIENT_SECRET (or YT_CLIENT_SECRET_JSON), YT_REFRESH_TOKEN,
+#   IG_ACCESS_TOKEN, IG_USER_ID
 
 # Validation thresholds (spec section 5)
 MAX_DURATION_SECONDS = 90

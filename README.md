@@ -54,6 +54,13 @@ scripts/
 3. Sign in as the account that owns the target channel, approve past the
    unverified-app warning, and copy the printed `YT_REFRESH_TOKEN` into
    Railway env vars.
+4. Also set `YT_CLIENT_ID` and `YT_CLIENT_SECRET` on Railway: two separate
+   plain values, shown on Google Cloud Console under Credentials > OAuth
+   2.0 Client IDs > your Desktop client. Copy each one into its own env
+   var. Do not paste just the "Client secret" value into
+   `YT_CLIENT_SECRET_JSON`, that one wants the entire downloaded
+   `client_secret.json` file's content (or a path to it) and exists only
+   as an alternative to the two-var form above.
 
 ### 2. Web upload page (TigerTech)
 
