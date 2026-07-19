@@ -21,18 +21,22 @@ def require_env(name: str) -> str:
     return value
 
 
-# SFTP. The account is NOT jailed to socialClips/ itself, it lands at the
-# web host account root (verified July 2026: SFTP for julianfox.com lands
-# at the account root, and the real path down to the watch folder is
-# dojopoc/socialClips). SFTP_BASE_PATH is that path from the SFTP login
-# root down to (and including) socialClips/, so it becomes config, not a
-# hardcoded assumption, since the dojo's real account will have its own
-# subdomain folder name here.
+# SFTP. The account is not chrooted the way the original handoff doc
+# assumed, it has visibility into the real filesystem, confirmed via
+# FileZilla (July 2026): the watch folder's real absolute path is
+# /var/www/html/ju/julianfox.com/dojopoc/socialClips. SFTP_BASE_PATH is
+# that absolute path, so it becomes config, not a hardcoded assumption,
+# since the dojo's real account will have its own path here. IMPORTANT:
+# only rstrip trailing slashes, never strip a leading "/", an absolute
+# path with the leading slash removed silently becomes a relative one
+# and resolves against whatever directory the SFTP login defaults into.
 SFTP_HOST = require_env("SFTP_HOST")
 SFTP_USER = require_env("SFTP_USER")
 SFTP_PASS = require_env("SFTP_PASS")
 SFTP_PORT = int(os.environ.get("SFTP_PORT", "22"))
-SFTP_BASE_PATH = os.environ.get("SFTP_BASE_PATH", "dojopoc/socialClips").strip().strip("/")
+SFTP_BASE_PATH = os.environ.get(
+    "SFTP_BASE_PATH", "/var/www/html/ju/julianfox.com/dojopoc/socialClips"
+).strip().rstrip("/")
 
 PENDING_DIR = posixpath.join(SFTP_BASE_PATH, "pending")
 DONE_DIR = posixpath.join(SFTP_BASE_PATH, "done")

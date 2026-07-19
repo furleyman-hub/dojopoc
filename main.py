@@ -154,24 +154,31 @@ def run() -> int:
 
 
 def _debug_list_tree() -> int:
-    log("SFTP_DEBUG_LIST_TREE=true: listing the SFTP login root instead of processing clips")
+    # Defaults to the SFTP login's default directory ("."). Override with
+    # SFTP_DEBUG_LIST_PATH (e.g. "/") if that default directory isn't a
+    # useful vantage point, without needing another code change/deploy.
+    start_path = os.environ.get("SFTP_DEBUG_LIST_PATH", ".").strip() or "."
+    log(
+        "SFTP_DEBUG_LIST_TREE=true: listing "
+        f"{start_path!r} instead of processing clips"
+    )
     try:
         with WatchFolder() as folder:
-            lines = folder.list_tree(".", max_depth=5)
+            lines = folder.list_tree(start_path, max_depth=5)
     except Exception:
         err = traceback.format_exc(limit=5)
         log(f"Could not list SFTP tree: {err}")
         try:
             notify.send_summary(
                 "Dojo clips: SFTP tree listing FAILED",
-                f"Could not connect or list the SFTP root:\n\n{err}",
+                f"Could not connect or list {start_path!r}:\n\n{err}",
             )
         except Exception:
             log(f"Also could not send the failure email: {traceback.format_exc(limit=3)}")
         return 1
 
     body = (
-        "Recursive listing from the SFTP login root (directories end in /).\n"
+        f"Recursive listing from {start_path!r} (directories end in /).\n"
         f"Currently configured SFTP_BASE_PATH: {config.SFTP_BASE_PATH!r}\n\n"
         + "\n".join(lines)
     )
