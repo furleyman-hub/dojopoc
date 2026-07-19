@@ -16,9 +16,16 @@ pending/ until both have succeeded.
 
 PUBLISH_ENABLED=false skips step 4: clips are validated and their copy
 is previewed in the email, but nothing posts and nothing moves to done/.
+
+SFTP_DEBUG_LIST_TREE=true skips all of the above and instead emails a
+recursive directory listing from the SFTP login root. Use this once to
+find the real path to socialClips/ if SFTP_BASE_PATH is wrong (a
+FileNotFoundError on list_pending_pairs means it is), then set
+SFTP_BASE_PATH correctly and turn this back off.
 """
 
 import json
+import os
 import posixpath
 import sys
 import tempfile
@@ -40,6 +47,9 @@ def log(msg: str) -> None:
 
 
 def run() -> int:
+    if os.environ.get("SFTP_DEBUG_LIST_TREE", "").strip().lower() in ("true", "1", "yes", "on"):
+        return _debug_list_tree()
+
     posted: list[dict] = []      # {base, youtube, instagram}
     previewed: list[dict] = []   # {base, description, copy} (publish disabled)
     rejected: list[tuple[str, str]] = []   # (base, reasons)
@@ -141,6 +151,33 @@ def run() -> int:
 
     log("Pipeline run finished")
     return 1 if errors else 0
+
+
+def _debug_list_tree() -> int:
+    log("SFTP_DEBUG_LIST_TREE=true: listing the SFTP login root instead of processing clips")
+    try:
+        with WatchFolder() as folder:
+            lines = folder.list_tree(".", max_depth=5)
+    except Exception:
+        err = traceback.format_exc(limit=5)
+        log(f"Could not list SFTP tree: {err}")
+        try:
+            notify.send_summary(
+                "Dojo clips: SFTP tree listing FAILED",
+                f"Could not connect or list the SFTP root:\n\n{err}",
+            )
+        except Exception:
+            log(f"Also could not send the failure email: {traceback.format_exc(limit=3)}")
+        return 1
+
+    body = (
+        "Recursive listing from the SFTP login root (directories end in /).\n"
+        f"Currently configured SFTP_BASE_PATH: {config.SFTP_BASE_PATH!r}\n\n"
+        + "\n".join(lines)
+    )
+    log("Listing complete, sending it by email")
+    notify.send_summary("Dojo clips: SFTP tree listing", body)
+    return 0
 
 
 def _state_path(directory: str, base: str) -> str:

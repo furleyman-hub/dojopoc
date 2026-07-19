@@ -112,3 +112,26 @@ class WatchFolder:
             self.sftp.remove(path)
         except FileNotFoundError:
             pass
+
+    def list_tree(self, path: str = ".", max_depth: int = 4) -> list[str]:
+        """Recursive directory listing from `path`, for diagnosing the real
+        layout of the SFTP account when a configured path guess is wrong.
+        Returns formatted lines, directories marked with a trailing slash.
+        """
+        lines: list[str] = []
+        self._walk(path, 0, max_depth, lines)
+        return lines
+
+    def _walk(self, path: str, depth: int, max_depth: int, lines: list[str]) -> None:
+        indent = "  " * depth
+        try:
+            entries = sorted(self.sftp.listdir_attr(path), key=lambda e: e.filename)
+        except OSError as exc:
+            lines.append(f"{indent}[could not list {path!r}: {exc}]")
+            return
+        for entry in entries:
+            is_dir = stat.S_ISDIR(entry.st_mode)
+            name = entry.filename + ("/" if is_dir else "")
+            lines.append(f"{indent}{name}")
+            if is_dir and depth + 1 < max_depth:
+                self._walk(posixpath.join(path, entry.filename), depth + 1, max_depth, lines)

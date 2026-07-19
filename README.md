@@ -113,6 +113,18 @@ Local test run (PowerShell): copy `.env.example` to `.env`, fill in values,
 Note: in PowerShell use `curl.exe` for any raw API checks, plain `curl` is
 an alias for `Invoke-WebRequest`.
 
+## If SFTP can't find pending/done/rejected
+
+`SFTP_BASE_PATH` (default `dojopoc/socialClips`) is the path from the SFTP
+login root down to the watch folder. The account is not necessarily jailed
+to `socialClips/` itself, it may land at the web host account root instead,
+so this is guesswork until verified against the real host. If a run fails
+with `FileNotFoundError` on `list_pending_pairs`, set
+`SFTP_DEBUG_LIST_TREE=true` on Railway and trigger one run: instead of
+processing clips, it emails a recursive directory listing from the SFTP
+login root. Use that to correct `SFTP_BASE_PATH`, then set
+`SFTP_DEBUG_LIST_TREE` back to `false`.
+
 ## Final testing checklist (the remaining human steps)
 
 1. Run the one-time YouTube refresh token script (setup section above) and
