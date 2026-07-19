@@ -1,7 +1,8 @@
 """SFTP access to the watch folder on the web host.
 
-The SFTP account is jailed to socialClips/ as its home directory, so all
-paths here are relative: pending/, done/, rejected/.
+The SFTP account lands at the account root, not inside socialClips/, so
+every path used here (config.PENDING_DIR etc.) already includes
+config.SFTP_BASE_PATH.
 """
 
 import posixpath
@@ -88,8 +89,8 @@ class WatchFolder:
         """Size in bytes of <base>.mp4 in pending/ (for a pre-download check)."""
         return self.sftp.stat(posixpath.join(config.PENDING_DIR, base + ".mp4")).st_size
 
-    # Small-file helpers (publish state, persisted IG token). Paths are
-    # relative to the SFTP home (socialClips/).
+    # Small-file helpers (publish state, persisted IG token). Callers pass
+    # full paths relative to the SFTP login root (e.g. config.IG_TOKEN_FILE).
 
     def read_text(self, path: str) -> str | None:
         """Contents of a small text file on the host, or None if missing."""

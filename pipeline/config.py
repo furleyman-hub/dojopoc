@@ -4,6 +4,7 @@ so the same code can later be redeployed for the dojo's real accounts.
 """
 
 import os
+import posixpath
 
 try:
     from dotenv import load_dotenv
@@ -20,16 +21,22 @@ def require_env(name: str) -> str:
     return value
 
 
-# SFTP (account is jailed to socialClips/ as its home directory, so these
-# paths are relative to that home)
+# SFTP. The account is NOT jailed to socialClips/ itself, it lands at the
+# web host account root (verified July 2026: SFTP for julianfox.com lands
+# at the account root, and the real path down to the watch folder is
+# dojopoc/socialClips). SFTP_BASE_PATH is that path from the SFTP login
+# root down to (and including) socialClips/, so it becomes config, not a
+# hardcoded assumption, since the dojo's real account will have its own
+# subdomain folder name here.
 SFTP_HOST = require_env("SFTP_HOST")
 SFTP_USER = require_env("SFTP_USER")
 SFTP_PASS = require_env("SFTP_PASS")
 SFTP_PORT = int(os.environ.get("SFTP_PORT", "22"))
+SFTP_BASE_PATH = os.environ.get("SFTP_BASE_PATH", "dojopoc/socialClips").strip().strip("/")
 
-PENDING_DIR = "pending"
-DONE_DIR = "done"
-REJECTED_DIR = "rejected"
+PENDING_DIR = posixpath.join(SFTP_BASE_PATH, "pending")
+DONE_DIR = posixpath.join(SFTP_BASE_PATH, "done")
+REJECTED_DIR = posixpath.join(SFTP_BASE_PATH, "rejected")
 
 # Notifications (Resend)
 RESEND_API_KEY = require_env("RESEND_API_KEY")
@@ -64,7 +71,7 @@ YT_CATEGORY_ID = os.environ.get("YT_CATEGORY_ID", "17").strip()  # 17 = Sports
 
 # Instagram token refresh cadence (spec section 6.1: weekly is plenty;
 # token must be at least 24h old to refresh)
-IG_TOKEN_FILE = "ig_token.json"          # persisted on the SFTP host
+IG_TOKEN_FILE = posixpath.join(SFTP_BASE_PATH, "ig_token.json")  # persisted on the SFTP host
 IG_REFRESH_INTERVAL_DAYS = 7
 
 # Credentials that are only needed when actually publishing are validated
