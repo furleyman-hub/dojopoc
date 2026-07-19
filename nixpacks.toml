@@ -1,8 +1,0 @@
-# Railway build config. ffmpeg (which provides ffprobe) is not in the
-# default Python image. nixPkgs (a real Nix package, guaranteed on PATH)
-# is the standard way to add it, more reliable than aptPkgs.
-[phases.setup]
-nixPkgs = ["ffmpeg"]
-
-[start]
-cmd = "python main.py"

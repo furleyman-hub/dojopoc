@@ -76,9 +76,9 @@ Set these env vars on the Railway service (see `.env.example`):
 `ANTHROPIC_API_KEY`, and optionally `NOTIFY_FROM` (a verified Resend
 sender), `CAPTION_MODEL`, and `BRAND_VOICE_FILE`.
 
-`nixpacks.toml` installs ffmpeg (for ffprobe) via a Nix package and starts
-`python main.py`. `railway.json` forces the Nixpacks builder and sets a
-cron schedule of every 20 minutes; each run:
+`Dockerfile` (python:3.12-slim, `apt-get install ffmpeg`, pip install,
+`python main.py`) is the build. `railway.json` forces the Dockerfile
+builder and sets a cron schedule of every 20 minutes; each run:
 
 1. connects to the host over SFTP (`SFTP_BASE_PATH`, see below)
 2. lists complete pairs in `pending/` (an `.mp4` with a matching `.txt`;
