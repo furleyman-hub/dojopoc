@@ -36,6 +36,14 @@ RESEND_API_KEY = require_env("RESEND_API_KEY")
 NOTIFY_EMAIL = require_env("NOTIFY_EMAIL")
 NOTIFY_FROM = os.environ.get("NOTIFY_FROM", "onboarding@resend.dev").strip()
 
+# Caption generation (Anthropic API)
+ANTHROPIC_API_KEY = require_env("ANTHROPIC_API_KEY")
+CAPTION_MODEL = os.environ.get("CAPTION_MODEL", "claude-opus-4-8").strip()
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BRAND_VOICE_FILE = os.environ.get("BRAND_VOICE_FILE", "").strip() or os.path.join(
+    _REPO_ROOT, "brand_voice.txt"
+)
+
 # Validation thresholds (spec section 5)
 MAX_DURATION_SECONDS = 90
 MAX_FILE_MB = 500

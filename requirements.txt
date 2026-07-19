@@ -2,6 +2,7 @@
 paramiko>=3.4
 requests>=2.31
 python-dotenv>=1.0
+anthropic>=0.69
 
 # One-time local script only (scripts/get_youtube_refresh_token.py) and,
 # later, YouTube publishing

@@ -1,9 +1,10 @@
 """Dojo social pipeline, scheduled entry point.
 
-Current stage (build order step 3): SFTP scan, download, ffprobe validation,
-move rejects, email summary. Publishing (captions, YouTube, Instagram) is not
-built yet, so valid clips are reported but LEFT IN pending/. Once publishing
-lands, valid clips will move to done/ only after both platforms confirm.
+Current stage (build order step 4): SFTP scan, download, ffprobe validation,
+move rejects, caption generation, email summary. Publishing (YouTube,
+Instagram) is not built yet, so valid clips are reported (with their
+generated copy, as a preview) but LEFT IN pending/. Once publishing lands,
+valid clips will move to done/ only after both platforms confirm.
 """
 
 import sys
@@ -12,6 +13,7 @@ import traceback
 from datetime import datetime, timezone
 
 from pipeline import config, notify
+from pipeline.captions import generate_captions
 from pipeline.sftp_client import WatchFolder
 from pipeline.validate import validate_video
 
@@ -22,7 +24,7 @@ def log(msg: str) -> None:
 
 
 def run() -> int:
-    valid: list[tuple[str, str]] = []      # (base, description)
+    valid: list[dict] = []                 # {base, description, copy}
     rejected: list[tuple[str, str]] = []   # (base, reasons)
     errors: list[str] = []
 
@@ -41,8 +43,12 @@ def run() -> int:
 
                     ok, problems = validate_video(video_path)
                     if ok:
-                        log(f"  valid: {base}")
-                        valid.append((base, description))
+                        log(f"  valid: {base}, generating captions")
+                        copy = generate_captions(description)
+                        log(f"  captions ready for {base}")
+                        valid.append(
+                            {"base": base, "description": description, "copy": copy}
+                        )
                         # Publishing not built yet: leave the pair in pending/
                         # so a later run picks it up once publishing exists.
                     else:
@@ -73,7 +79,7 @@ def run() -> int:
 
 
 def build_summary(
-    valid: list[tuple[str, str]],
+    valid: list[dict],
     rejected: list[tuple[str, str]],
     errors: list[str],
 ) -> tuple[str, str]:
@@ -88,11 +94,20 @@ def build_summary(
 
     lines = []
     if valid:
-        lines.append("Valid clips (publishing not built yet, left in pending/):")
-        for base, description in valid:
-            lines.append(f"  {base}.mp4")
-            lines.append(f'    description: "{description}"')
+        lines.append("Valid clips (publishing not built yet, left in pending/).")
+        lines.append("Generated copy below is a preview of what will post:")
         lines.append("")
+        for item in valid:
+            copy = item["copy"]
+            lines.append(f"  {item['base']}.mp4")
+            lines.append(f'    description: "{item["description"]}"')
+            lines.append("    Instagram caption:")
+            lines.append(f"      {copy['instagram_caption']}")
+            lines.append("    YouTube title:")
+            lines.append(f"      {copy['youtube_title']}")
+            lines.append("    YouTube description:")
+            lines.append(f"      {copy['youtube_description']}")
+            lines.append("")
     if rejected:
         lines.append("Rejected (moved to rejected/):")
         for base, reasons in rejected:

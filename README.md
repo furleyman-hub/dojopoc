@@ -9,7 +9,7 @@ everything after that is automated. Full spec: `dojo-social-automation-handoff.m
 1. [x] `scripts/get_youtube_refresh_token.py` (one-time local run still needed, see below)
 2. [x] Web upload page + PHP endpoint
 3. [x] Pipeline skeleton: SFTP scan/download/move + ffprobe validation + Resend summary (no publishing yet)
-4. [ ] Caption generation (Anthropic API)
+4. [x] Caption generation (Anthropic API)
 5. [ ] YouTube publishing (private visibility for tests)
 6. [ ] Instagram publishing (container flow)
 7. [ ] IG token refresh job
@@ -23,7 +23,9 @@ pipeline/
   config.py             env vars + validation thresholds
   sftp_client.py        watch folder access (pending/done/rejected)
   validate.py           ffprobe checks
+  captions.py           Anthropic API: description to per-platform copy
   notify.py             Resend summary email
+brand_voice.txt         editable voice/style config for caption generation
 web/                    deploy manually to TigerTech (not by Railway)
   social-upload.html    upload page: per-clip description, immediate upload
   social-upload.php     saves <base>.mp4 + <base>.txt into socialClips/pending/
@@ -67,7 +69,8 @@ independently with its own status.
 
 Set these env vars on the Railway service (see `.env.example`):
 `SFTP_HOST`, `SFTP_USER`, `SFTP_PASS`, `RESEND_API_KEY`, `NOTIFY_EMAIL`,
-and optionally `NOTIFY_FROM` (a verified Resend sender).
+`ANTHROPIC_API_KEY`, and optionally `NOTIFY_FROM` (a verified Resend
+sender), `CAPTION_MODEL`, and `BRAND_VOICE_FILE`.
 
 `nixpacks.toml` installs ffmpeg (for ffprobe) and starts `python main.py`.
 Each run:
@@ -77,9 +80,16 @@ Each run:
    half-uploaded singles are skipped until complete)
 3. downloads each pair and re-validates the video with ffprobe
 4. failures move to `rejected/` on the host and are listed in the email
-5. valid clips are reported in the email but left in `pending/`, because
-   publishing is not built yet; nothing posts anywhere at this stage
-6. sends one plain-text Resend summary (no email when nothing happened)
+5. for valid clips, generates the Instagram caption and YouTube title and
+   description from the uploaded text via the Anthropic API, using the
+   voice defined in `brand_voice.txt` (edit that file to change the tone;
+   the POC to dojo switch is just swapping that file)
+6. valid clips are reported in the email with their generated copy as a
+   preview, but left in `pending/`, because publishing is not built yet;
+   nothing posts anywhere at this stage. Note: until publishing lands,
+   a valid clip left in pending regenerates its captions on every run,
+   so do not put this on a cron schedule yet (scheduling is step 8).
+7. sends one plain-text Resend summary (no email when nothing happened)
 
 Local test run (PowerShell): copy `.env.example` to `.env`, fill in values,
 `pip install -r requirements.txt`, install ffmpeg, then `python main.py`.

@@ -1,0 +1,17 @@
+Voice and style for all generated captions and titles.
+
+This file is configuration, not code. Edit it freely; the pipeline reads it
+on every run. When the POC is redeployed for the dojo's real accounts,
+replace this with the dojo's actual brand voice.
+
+Voice for this POC:
+- Friendly and energetic, like a coach who loves the sport
+- Plain language, short sentences, no corporate fluff
+- No em dashes, ever
+- Emoji are fine in Instagram captions (2 or 3 max), avoid them in YouTube titles
+- Never invent facts that are not in the clip description (names, dates,
+  locations, belt ranks). Work only with what the description says.
+
+Audience: people curious about martial arts and current students' families.
+
+Call to action: keep it light. "Come train with us" energy, not a hard sell.
