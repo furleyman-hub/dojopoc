@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Social Clip Upload</title>
+<style>
+  :root {
+    --ok: #1a7f37;
+    --err: #b42318;
+    --warn: #9a6700;
+    --border: #d0d7de;
+    --muted: #57606a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 16px;
+    color: #1f2328;
+    background: #f6f8fa;
+  }
+  h1 { font-size: 1.4rem; }
+  p.hint { color: var(--muted); font-size: 0.9rem; }
+  .picker {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    text-align: center;
+    background: #fff;
+    margin-bottom: 16px;
+  }
+  .picker input { display: none; }
+  .picker label {
+    display: inline-block;
+    padding: 10px 20px;
+    background: #1f6feb;
+    color: #fff;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .card .name { font-weight: 600; word-break: break-all; }
+  .card .meta { color: var(--muted); font-size: 0.85rem; margin: 4px 0; }
+  .card textarea {
+    width: 100%;
+    min-height: 56px;
+    margin: 8px 0;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: inherit;
+    resize: vertical;
+  }
+  .card button {
+    padding: 8px 18px;
+    border: 0;
+    border-radius: 6px;
+    background: #1f6feb;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .card button:disabled { background: #8c959f; cursor: not-allowed; }
+  .status { font-size: 0.9rem; margin-top: 6px; }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  .status.warn { color: var(--warn); }
+  progress { width: 100%; height: 8px; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<h1>Social Clip Upload</h1>
+<p class="hint">
+  Vertical MP4 clips only (9:16, like a phone filmed upright).
+  Hard limits: 90 seconds and 500 MB. 60 seconds or less is recommended.
+  Each clip needs a one or two line description; that text becomes the raw
+  material for the captions.
+</p>
+
+<div class="picker">
+  <label for="filePick">Choose MP4 clip(s)</label>
+  <input type="file" id="filePick" accept=".mp4,video/mp4" multiple>
+  <p class="hint">You can add more clips at any time. Each one uploads on its own.</p>
+</div>
+
+<div id="items"></div>
+
+<script>
+(function () {
+  var ENDPOINT = 'social-upload.php';
+  var MAX_BYTES = 500 * 1024 * 1024;
+  var MAX_SECONDS = 90;
+  var RECOMMENDED_SECONDS = 60;
+  var TARGET_ASPECT = 9 / 16;          // width / height for vertical video
+  var ASPECT_TOLERANCE = 0.10;         // relative tolerance
+
+  var itemsEl = document.getElementById('items');
+  var pick = document.getElementById('filePick');
+
+  pick.addEventListener('change', function () {
+    Array.prototype.forEach.call(pick.files, addItem);
+    pick.value = '';
+  });
+
+  function addItem(file) {
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML =
+      '<div class="name"></div>' +
+      '<div class="meta"></div>' +
+      '<textarea placeholder="One or two lines describing this clip (used to write the captions)"></textarea>' +
+      '<button type="button" disabled>Upload</button>' +
+      '<progress value="0" max="100" hidden></progress>' +
+      '<div class="status"></div>';
+    card.querySelector('.name').textContent = file.name;
+    card.querySelector('.meta').textContent = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
+    itemsEl.appendChild(card);
+
+    var button = card.querySelector('button');
+    var textarea = card.querySelector('textarea');
+    var statusEl = card.querySelector('.status');
+    var progressEl = card.querySelector('progress');
+    var valid = false;
+    var uploaded = false;
+
+    function setStatus(msg, cls) {
+      statusEl.textContent = msg;
+      statusEl.className = 'status' + (cls ? ' ' + cls : '');
+    }
+
+    function refreshButton() {
+      button.disabled = !(valid && !uploaded && textarea.value.trim() !== '');
+    }
+    textarea.addEventListener('input', refreshButton);
+
+    // Cheap checks first.
+    var isMp4 = /\.mp4$/i.test(file.name) || file.type === 'video/mp4';
+    if (!isMp4) {
+      setStatus('Blocked: only MP4 files are accepted.', 'err');
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      setStatus('Blocked: file is over 500 MB.', 'err');
+      return;
+    }
+
+    // Duration and dimensions from the video metadata.
+    setStatus('Checking video...', '');
+    var url = URL.createObjectURL(file);
+    var video = document.createElement('video');
+    video.preload = 'metadata';
+    video.onerror = function () {
+      URL.revokeObjectURL(url);
+      setStatus('Blocked: this file could not be read as a video.', 'err');
+    };
+    video.onloadedmetadata = function () {
+      URL.revokeObjectURL(url);
+      var problems = [];
+      var warnings = [];
+
+      if (video.duration > MAX_SECONDS) {
+        problems.push('duration is ' + Math.round(video.duration) + 's (limit ' + MAX_SECONDS + 's)');
+      } else if (video.duration > RECOMMENDED_SECONDS) {
+        warnings.push('duration is ' + Math.round(video.duration) + 's; ' + RECOMMENDED_SECONDS + 's or less is recommended');
+      }
+
+      var w = video.videoWidth, h = video.videoHeight;
+      if (!w || !h) {
+        problems.push('could not read video dimensions');
+      } else {
+        var aspect = w / h;
+        if (h <= w || Math.abs(aspect - TARGET_ASPECT) / TARGET_ASPECT > ASPECT_TOLERANCE) {
+          problems.push('not vertical 9:16 (got ' + w + 'x' + h + ')');
+        }
+      }
+
+      if (problems.length) {
+        setStatus('Blocked: ' + problems.join('; ') + '.', 'err');
+        return;
+      }
+      valid = true;
+      if (warnings.length) {
+        setStatus('OK to upload. Note: ' + warnings.join('; ') + '.', 'warn');
+      } else {
+        setStatus('OK. Add a description, then upload.', 'ok');
+      }
+      refreshButton();
+    };
+    video.src = url;
+
+    button.addEventListener('click', function () {
+      var description = textarea.value.trim();
+      if (!valid || uploaded || description === '') return;
+      button.disabled = true;
+      textarea.disabled = true;
+      progressEl.hidden = false;
+      setStatus('Uploading...', '');
+
+      var form = new FormData();
+      form.append('video', file);
+      form.append('description', description);
+
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', ENDPOINT);
+      xhr.upload.onprogress = function (e) {
+        if (e.lengthComputable) {
+          progressEl.value = Math.round((e.loaded / e.total) * 100);
+        }
+      };
+      xhr.onload = function () {
+        progressEl.hidden = true;
+        var res = null;
+        try { res = JSON.parse(xhr.responseText); } catch (e) {}
+        if (xhr.status === 200 && res && res.ok) {
+          uploaded = true;
+          setStatus('Done. Saved as ' + res.name + '. It will be picked up on the next pipeline run.', 'ok');
+        } else {
+          var msg = (res && res.error) ? res.error : ('server error (HTTP ' + xhr.status + ')');
+          setStatus('Upload failed: ' + msg, 'err');
+          button.disabled = false;
+          textarea.disabled = false;
+        }
+      };
+      xhr.onerror = function () {
+        progressEl.hidden = true;
+        setStatus('Upload failed: network error. Try again.', 'err');
+        button.disabled = false;
+        textarea.disabled = false;
+      };
+      xhr.send(form);
+    });
+  }
+})();
+</script>
+
+</body>
+</html>

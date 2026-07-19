@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Credentials and media (never commit)
+client_secret*.json
+*.token
+token*.json
+*.mp4
+*.mov
+.env.*
+!.env.example

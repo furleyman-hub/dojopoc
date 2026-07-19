@@ -1,0 +1,7 @@
+# Railway build config. ffmpeg (which provides ffprobe) is not in the
+# default Python image, so add it here.
+[phases.setup]
+aptPkgs = ["ffmpeg"]
+
+[start]
+cmd = "python main.py"
