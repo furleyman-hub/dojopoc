@@ -89,6 +89,20 @@ PUBLIC_CLIP_BASE_URL = require_env("PUBLIC_CLIP_BASE_URL").rstrip("/")
 YT_PRIVACY_STATUS = os.environ.get("YT_PRIVACY_STATUS", "private").strip()
 YT_CATEGORY_ID = os.environ.get("YT_CATEGORY_ID", "17").strip()  # 17 = Sports
 
+# YouTube metadata languages (BCP-47, e.g. "en"). Optional: empty means
+# the fields are omitted from the upload request entirely, exactly the
+# Phase 1 behavior. YT_DEFAULT_AUDIO_LANGUAGE falls back to
+# YT_DEFAULT_LANGUAGE so setting one var covers the common case.
+YT_DEFAULT_LANGUAGE = os.environ.get("YT_DEFAULT_LANGUAGE", "").strip()
+YT_DEFAULT_AUDIO_LANGUAGE = (
+    os.environ.get("YT_DEFAULT_AUDIO_LANGUAGE", "").strip() or YT_DEFAULT_LANGUAGE
+)
+
+# Instagram location tagging for local discovery. The Facebook Page ID of
+# a place (the dojo's own page). Optional: empty disables tagging and the
+# container call is byte-identical to Phase 1.
+IG_LOCATION_ID = os.environ.get("IG_LOCATION_ID", "").strip()
+
 # Instagram token refresh cadence (spec section 6.1: weekly is plenty;
 # token must be at least 24h old to refresh)
 IG_TOKEN_FILE = posixpath.join(SFTP_BASE_PATH, "ig_token.json")  # persisted on the SFTP host

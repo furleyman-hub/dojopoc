@@ -34,18 +34,29 @@ def publish_to_instagram(base: str, caption: str, access_token: str) -> dict:
 
 
 def _create_container(ig_user_id, video_url, caption, access_token) -> str:
-    resp = requests.post(
-        f"{GRAPH}/{ig_user_id}/media",
-        data={
-            "media_type": "REELS",
-            "video_url": video_url,
-            "caption": caption,
-            "access_token": access_token,
-        },
-        timeout=60,
-    )
-    data = _checked(resp, "create media container")
-    return data["id"]
+    payload = {
+        "media_type": "REELS",
+        "video_url": video_url,
+        "caption": caption,
+        "access_token": access_token,
+    }
+    if config.IG_LOCATION_ID:
+        payload["location_id"] = config.IG_LOCATION_ID
+        try:
+            resp = requests.post(f"{GRAPH}/{ig_user_id}/media", data=payload, timeout=60)
+            return _checked(resp, "create media container (with location)")["id"]
+        except RuntimeError as exc:
+            # A wrong or unsupported location id must never block a post.
+            # Log, drop the tag, and fall through to the plain call.
+            print(
+                f"Instagram location tagging failed (IG_LOCATION_ID="
+                f"{config.IG_LOCATION_ID!r}), posting without it: {exc}",
+                flush=True,
+            )
+            del payload["location_id"]
+
+    resp = requests.post(f"{GRAPH}/{ig_user_id}/media", data=payload, timeout=60)
+    return _checked(resp, "create media container")["id"]
 
 
 def _wait_until_finished(container_id, access_token) -> None:

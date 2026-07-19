@@ -89,8 +89,14 @@ POC values): `SFTP_HOST`, `SFTP_USER`, `SFTP_PASS`, `SFTP_BASE_PATH`,
 `ANTHROPIC_API_KEY`, `YT_CLIENT_ID`, `YT_CLIENT_SECRET`,
 `YT_REFRESH_TOKEN`, `IG_ACCESS_TOKEN`, `IG_USER_ID`, and optionally
 `NOTIFY_FROM` (a verified Resend sender), `CAPTION_MODEL`,
-`BRAND_VOICE_FILE`, and `POST_INTERVAL_HOURS` (see below; defaults to
-24). The account-specific ones (`SFTP_BASE_PATH`,
+`BRAND_VOICE_FILE`, `POST_INTERVAL_HOURS` (see below; defaults to
+24), and the distribution levers `IG_LOCATION_ID` (tag the dojo's own
+place page on every Reel for local discovery; if Instagram rejects the
+id the clip still posts untagged) and `YT_DEFAULT_LANGUAGE` /
+`YT_DEFAULT_AUDIO_LANGUAGE` (BCP-47 codes like `en`; the audio one
+falls back to the first). YouTube uploads also carry search tags
+generated alongside the captions; no config needed for that. The
+account-specific ones (`SFTP_BASE_PATH`,
 `PUBLIC_CLIP_BASE_URL`, all credentials) are required with no defaults
 in code, so the POC to dojo transition is entirely a matter of changing
 Railway variables and `brand_voice.txt`, never editing code.

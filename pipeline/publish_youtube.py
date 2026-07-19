@@ -25,16 +25,31 @@ from pipeline import config
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 
-def publish_to_youtube(video_path: str, title: str, description: str) -> dict:
-    """Upload one clip. Returns {"id", "url"}. Raises on failure."""
+def publish_to_youtube(
+    video_path: str, title: str, description: str, tags: list[str] | None = None
+) -> dict:
+    """Upload one clip. Returns {"id", "url"}. Raises on failure.
+
+    tags and the language defaults are optional: clips whose state file
+    predates tag generation, or deployments without YT_DEFAULT_LANGUAGE
+    set, upload with the exact Phase 1 request body.
+    """
     youtube = build("youtube", "v3", credentials=_credentials(), cache_discovery=False)
 
+    snippet = {
+        "title": title,
+        "description": description,
+        "categoryId": config.YT_CATEGORY_ID,
+    }
+    if tags:
+        snippet["tags"] = tags
+    if config.YT_DEFAULT_LANGUAGE:
+        snippet["defaultLanguage"] = config.YT_DEFAULT_LANGUAGE
+    if config.YT_DEFAULT_AUDIO_LANGUAGE:
+        snippet["defaultAudioLanguage"] = config.YT_DEFAULT_AUDIO_LANGUAGE
+
     body = {
-        "snippet": {
-            "title": title,
-            "description": description,
-            "categoryId": config.YT_CATEGORY_ID,
-        },
+        "snippet": snippet,
         "status": {
             "privacyStatus": config.YT_PRIVACY_STATUS,
             "selfDeclaredMadeForKids": False,

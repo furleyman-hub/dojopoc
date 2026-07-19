@@ -17,6 +17,10 @@ from pipeline import config
 IG_CAPTION_MAX = 2200
 YT_TITLE_MAX = 100
 YT_DESCRIPTION_MAX = 5000
+# YouTube caps the tags field at 500 characters total (commas and the
+# implicit quoting of multi-word tags count too), so stay well under.
+YT_TAGS_MAX_COUNT = 15
+YT_TAGS_MAX_TOTAL_CHARS = 400
 
 OUTPUT_SCHEMA = {
     "type": "object",
@@ -33,8 +37,15 @@ OUTPUT_SCHEMA = {
             "type": "string",
             "description": "YouTube description, must include #Shorts",
         },
+        "youtube_tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "YouTube search tags, plain words or phrases without #",
+        },
     },
-    "required": ["instagram_caption", "youtube_title", "youtube_description"],
+    "required": [
+        "instagram_caption", "youtube_title", "youtube_description", "youtube_tags",
+    ],
     "additionalProperties": False,
 }
 
@@ -49,6 +60,10 @@ who filmed it. From it, produce copy for two platforms:
    no hashtags in the title.
 3. youtube_description: a YouTube description of one to three sentences.
    It MUST include the hashtag #Shorts.
+4. youtube_tags: {tags_min} to {tags_max} search tags for the YouTube video.
+   Plain words or short phrases, no # symbol. Mix broad discovery terms
+   (the martial art, the sport) with specific ones from the clip
+   (the technique shown, the drill, the skill level).
 
 Follow this brand voice exactly:
 
@@ -65,6 +80,8 @@ def generate_captions(description: str) -> dict:
     system = SYSTEM_PROMPT.format(
         ig_max=IG_CAPTION_MAX,
         yt_title_max=YT_TITLE_MAX,
+        tags_min=8,
+        tags_max=YT_TAGS_MAX_COUNT,
         brand_voice=_load_brand_voice(),
     )
 
@@ -91,7 +108,35 @@ def _enforce_limits(copy: dict) -> dict:
     copy["instagram_caption"] = copy["instagram_caption"][:IG_CAPTION_MAX]
     copy["youtube_title"] = copy["youtube_title"][:YT_TITLE_MAX]
     copy["youtube_description"] = copy["youtube_description"][:YT_DESCRIPTION_MAX]
+    copy["youtube_tags"] = _clean_tags(copy.get("youtube_tags", []))
     return copy
+
+
+def _clean_tags(tags: list) -> list[str]:
+    """Dedupe, strip stray # prefixes, and stay under YouTube's caps.
+    Tags are optional metadata, so a malformed list degrades to fewer
+    tags rather than failing the clip.
+    """
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    total = 0
+    for tag in tags:
+        if not isinstance(tag, str):
+            continue
+        tag = tag.strip().lstrip("#").strip()
+        key = tag.lower()
+        if not tag or key in seen:
+            continue
+        # Multi-word tags count their wrapping quotes toward the limit.
+        cost = len(tag) + (2 if " " in tag else 0)
+        if total + cost > YT_TAGS_MAX_TOTAL_CHARS:
+            break
+        seen.add(key)
+        cleaned.append(tag)
+        total += cost
+        if len(cleaned) >= YT_TAGS_MAX_COUNT:
+            break
+    return cleaned
 
 
 def _load_brand_voice() -> str:

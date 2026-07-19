@@ -252,7 +252,10 @@ def _publish_clip(
     if "youtube" not in state:
         log(f"  uploading {base} to YouTube")
         state["youtube"] = publish_to_youtube(
-            video_path, copy["youtube_title"], copy["youtube_description"]
+            video_path,
+            copy["youtube_title"],
+            copy["youtube_description"],
+            tags=copy.get("youtube_tags"),
         )
         _save_state(folder, base, state)
         log(f"  YouTube done: {state['youtube']['url']}")
@@ -470,6 +473,9 @@ def build_summary(
             lines.append(f"      {copy['youtube_title']}")
             lines.append("    YouTube description:")
             lines.append(f"      {copy['youtube_description']}")
+            if copy.get("youtube_tags"):
+                lines.append("    YouTube tags:")
+                lines.append(f"      {', '.join(copy['youtube_tags'])}")
             lines.append("")
     if rejected:
         lines.append("Rejected (moved to rejected/):")
