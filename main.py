@@ -46,7 +46,20 @@ def log(msg: str) -> None:
     print(f"[{stamp}] {msg}", flush=True)
 
 
+def running_commit() -> str:
+    """The git commit this container was built from, per Railway's own
+    build metadata (empty string if not running on Railway, or if the
+    Dockerfile build didn't promote the ARG to ENV). Use this to check
+    whether a given run actually reflects the latest push, rather than
+    assuming it, since a stale deployment can otherwise look identical to
+    a real bug for several rounds.
+    """
+    sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "").strip()
+    return sha[:12] if sha else "unknown"
+
+
 def run() -> int:
+    commit = running_commit()
     if os.environ.get("SFTP_DEBUG_LIST_TREE", "").strip().lower() in ("true", "1", "yes", "on"):
         return _debug_list_tree()
 
@@ -56,7 +69,7 @@ def run() -> int:
     errors: list[str] = []
     ig_token = None
 
-    log("Pipeline run starting")
+    log(f"Pipeline run starting (commit {commit})")
     if not config.PUBLISH_ENABLED:
         log("PUBLISH_ENABLED=false: preview mode, nothing will post")
 
@@ -142,7 +155,7 @@ def run() -> int:
 
     if posted or previewed or rejected or errors:
         try:
-            notify.send_summary(*build_summary(posted, previewed, rejected, errors))
+            notify.send_summary(*build_summary(posted, previewed, rejected, errors, commit))
             log("Summary email sent")
         except Exception:
             log(f"Could not send summary email: {traceback.format_exc(limit=3)}")
@@ -154,12 +167,13 @@ def run() -> int:
 
 
 def _debug_list_tree() -> int:
+    commit = running_commit()
     # Defaults to the SFTP login's default directory ("."). Override with
     # SFTP_DEBUG_LIST_PATH (e.g. "/") if that default directory isn't a
     # useful vantage point, without needing another code change/deploy.
     start_path = os.environ.get("SFTP_DEBUG_LIST_PATH", ".").strip() or "."
     log(
-        "SFTP_DEBUG_LIST_TREE=true: listing "
+        f"SFTP_DEBUG_LIST_TREE=true (commit {commit}): listing "
         f"{start_path!r} instead of processing clips"
     )
     try:
@@ -170,7 +184,7 @@ def _debug_list_tree() -> int:
         log(f"Could not list SFTP tree: {err}")
         try:
             notify.send_summary(
-                "Dojo clips: SFTP tree listing FAILED",
+                f"Dojo clips [{commit}]: SFTP tree listing FAILED",
                 f"Could not connect or list {start_path!r}:\n\n{err}",
             )
         except Exception:
@@ -183,7 +197,7 @@ def _debug_list_tree() -> int:
         + "\n".join(lines)
     )
     log("Listing complete, sending it by email")
-    notify.send_summary("Dojo clips: SFTP tree listing", body)
+    notify.send_summary(f"Dojo clips [{commit}]: SFTP tree listing", body)
     return 0
 
 
@@ -221,6 +235,7 @@ def build_summary(
     previewed: list[dict],
     rejected: list[tuple[str, str]],
     errors: list[str],
+    commit: str = "unknown",
 ) -> tuple[str, str]:
     parts = []
     if posted:
@@ -231,7 +246,7 @@ def build_summary(
         parts.append(f"{len(rejected)} rejected")
     if errors:
         parts.append(f"{len(errors)} error(s)")
-    subject = "Dojo clips: " + ", ".join(parts)
+    subject = f"Dojo clips [{commit}]: " + ", ".join(parts)
 
     lines = []
     if posted:
