@@ -6,14 +6,19 @@ everything after that is automated. Full spec: `dojo-social-automation-handoff.m
 
 ## Build status (spec section 8)
 
-1. [x] `scripts/get_youtube_refresh_token.py` (one-time local run still needed, see below)
+All 8 steps complete. First successful end-to-end run July 19, 2026: a
+real clip went from the upload page through validation and caption
+generation to a YouTube Short and an Instagram Reel, moved to `done/`,
+and the summary email carried working links to both posts.
+
+1. [x] `scripts/get_youtube_refresh_token.py`
 2. [x] Web upload page + PHP endpoint
-3. [x] Pipeline skeleton: SFTP scan/download/move + ffprobe validation + Resend summary (no publishing yet)
+3. [x] Pipeline skeleton: SFTP scan/download/move + ffprobe validation + Resend summary
 4. [x] Caption generation (Anthropic API)
-5. [x] YouTube publishing (private visibility for tests)
+5. [x] YouTube publishing
 6. [x] Instagram publishing (container flow)
 7. [x] IG token refresh job
-8. [x] Railway cron config; end-to-end test with real credentials still to run
+8. [x] Railway cron config + end-to-end test with real credentials
 
 ## Layout
 
