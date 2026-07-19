@@ -21,22 +21,21 @@ def require_env(name: str) -> str:
     return value
 
 
-# SFTP. The account is not chrooted the way the original handoff doc
-# assumed, it has visibility into the real filesystem, confirmed via
-# FileZilla (July 2026): the watch folder's real absolute path is
-# /var/www/html/ju/julianfox.com/dojopoc/socialClips. SFTP_BASE_PATH is
-# that absolute path, so it becomes config, not a hardcoded assumption,
-# since the dojo's real account will have its own path here. IMPORTANT:
-# only rstrip trailing slashes, never strip a leading "/", an absolute
-# path with the leading slash removed silently becomes a relative one
-# and resolves against whatever directory the SFTP login defaults into.
+# SFTP. SFTP_BASE_PATH is the absolute path to the socialClips watch
+# folder as seen from the SFTP login (the account is not chrooted; for
+# the POC, confirmed via FileZilla, it is
+# /var/www/html/ju/julianfox.com/dojopoc/socialClips). Required with no
+# default so the POC to dojo transition can never silently run against
+# the wrong account's folders because a variable was forgotten.
+# IMPORTANT: only rstrip trailing slashes, never strip a leading "/",
+# an absolute path with the leading slash removed silently becomes a
+# relative one and resolves against whatever directory the SFTP login
+# defaults into.
 SFTP_HOST = require_env("SFTP_HOST")
 SFTP_USER = require_env("SFTP_USER")
 SFTP_PASS = require_env("SFTP_PASS")
 SFTP_PORT = int(os.environ.get("SFTP_PORT", "22"))
-SFTP_BASE_PATH = os.environ.get(
-    "SFTP_BASE_PATH", "/var/www/html/ju/julianfox.com/dojopoc/socialClips"
-).strip().rstrip("/")
+SFTP_BASE_PATH = require_env("SFTP_BASE_PATH").rstrip("/")
 
 PENDING_DIR = posixpath.join(SFTP_BASE_PATH, "pending")
 DONE_DIR = posixpath.join(SFTP_BASE_PATH, "done")
@@ -63,10 +62,11 @@ PUBLISH_ENABLED = os.environ.get("PUBLISH_ENABLED", "true").strip().lower() not 
 )
 
 # Public HTTPS base for clips in pending/ (Instagram fetches the video
-# server-side from a URL; it cannot be pushed as bytes)
-PUBLIC_CLIP_BASE_URL = os.environ.get(
-    "PUBLIC_CLIP_BASE_URL", "https://dojopoc.julianfox.com/socialClips/pending"
-).strip().rstrip("/")
+# server-side from a URL; it cannot be pushed as bytes). Required with
+# no default for the same reason as SFTP_BASE_PATH: the dojo redeploy
+# gets its own domain, and forgetting this variable should fail loudly
+# rather than serve clips from the POC subdomain.
+PUBLIC_CLIP_BASE_URL = require_env("PUBLIC_CLIP_BASE_URL").rstrip("/")
 
 # YouTube. Test uploads stay private until final testing (spec section 3);
 # flip YT_PRIVACY_STATUS to "public" when ready.

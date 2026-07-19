@@ -34,7 +34,7 @@ pipeline/
   token_refresh.py      IG long-lived token: persist on host, refresh weekly
   notify.py             Resend summary email
 brand_voice.txt         editable voice/style config for caption generation
-railway.json            cron schedule (every 20 min) for Railway
+railway.json            Railway build/deploy config (cron lives in the dashboard)
 web/                    deploy manually to TigerTech (not by Railway)
   social-upload.html    upload page: per-clip description, immediate upload
   social-upload.php     saves <base>.mp4 + <base>.txt into socialClips/pending/
@@ -83,14 +83,27 @@ independently with its own status.
 
 ### 3. Pipeline (Railway)
 
-Set these env vars on the Railway service (see `.env.example`):
-`SFTP_HOST`, `SFTP_USER`, `SFTP_PASS`, `RESEND_API_KEY`, `NOTIFY_EMAIL`,
-`ANTHROPIC_API_KEY`, and optionally `NOTIFY_FROM` (a verified Resend
-sender), `CAPTION_MODEL`, and `BRAND_VOICE_FILE`.
+Set these env vars on the Railway service (see `.env.example` for the
+POC values): `SFTP_HOST`, `SFTP_USER`, `SFTP_PASS`, `SFTP_BASE_PATH`,
+`PUBLIC_CLIP_BASE_URL`, `RESEND_API_KEY`, `NOTIFY_EMAIL`,
+`ANTHROPIC_API_KEY`, `YT_CLIENT_ID`, `YT_CLIENT_SECRET`,
+`YT_REFRESH_TOKEN`, `IG_ACCESS_TOKEN`, `IG_USER_ID`, and optionally
+`NOTIFY_FROM` (a verified Resend sender), `CAPTION_MODEL`, and
+`BRAND_VOICE_FILE`. The account-specific ones (`SFTP_BASE_PATH`,
+`PUBLIC_CLIP_BASE_URL`, all credentials) are required with no defaults
+in code, so the POC to dojo transition is entirely a matter of changing
+Railway variables and `brand_voice.txt`, never editing code.
+
+The cron schedule is managed in the Railway dashboard (Service >
+Settings > Cron Schedule; the POC runs `*/20 * * * *`, every 20
+minutes). It is deliberately NOT set in `railway.json`, because
+config-as-code overrides the dashboard when present; leaving it out
+means the interval can be changed in the dashboard anytime without
+touching this repo.
 
 `Dockerfile` (python:3.12-slim, `apt-get install ffmpeg`, pip install,
 `python main.py`) is the build. `railway.json` forces the Dockerfile
-builder and sets a cron schedule of every 20 minutes; each run:
+builder; each run:
 
 1. connects to the host over SFTP (`SFTP_BASE_PATH`, see below)
 2. lists complete pairs in `pending/` (an `.mp4` with a matching `.txt`;
@@ -132,11 +145,12 @@ an alias for `Invoke-WebRequest`.
 
 ## If SFTP can't find pending/done/rejected
 
-`SFTP_BASE_PATH` (default `dojopoc/socialClips`) is the path from the SFTP
-login root down to the watch folder. The account is not necessarily jailed
-to `socialClips/` itself, it may land at the web host account root instead,
-so this is guesswork until verified against the real host. If a run fails
-with `FileNotFoundError` on `list_pending_pairs`, set
+`SFTP_BASE_PATH` is the absolute path from the SFTP login to the watch
+folder (POC value: `/var/www/html/ju/julianfox.com/dojopoc/socialClips`).
+The account is not necessarily jailed to `socialClips/` itself, it may
+land at the web host account root instead, so a new account's path is
+guesswork until verified against the real host. If a run fails with
+`FileNotFoundError` on `list_pending_pairs`, set
 `SFTP_DEBUG_LIST_TREE=true` on Railway and trigger one run: instead of
 processing clips, it emails a recursive directory listing from the SFTP
 login root. Use that to correct `SFTP_BASE_PATH`, then set
