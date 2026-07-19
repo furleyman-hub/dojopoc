@@ -88,11 +88,42 @@ POC values): `SFTP_HOST`, `SFTP_USER`, `SFTP_PASS`, `SFTP_BASE_PATH`,
 `PUBLIC_CLIP_BASE_URL`, `RESEND_API_KEY`, `NOTIFY_EMAIL`,
 `ANTHROPIC_API_KEY`, `YT_CLIENT_ID`, `YT_CLIENT_SECRET`,
 `YT_REFRESH_TOKEN`, `IG_ACCESS_TOKEN`, `IG_USER_ID`, and optionally
-`NOTIFY_FROM` (a verified Resend sender), `CAPTION_MODEL`, and
-`BRAND_VOICE_FILE`. The account-specific ones (`SFTP_BASE_PATH`,
+`NOTIFY_FROM` (a verified Resend sender), `CAPTION_MODEL`,
+`BRAND_VOICE_FILE`, and `POST_INTERVAL_HOURS` (see below; defaults to
+24). The account-specific ones (`SFTP_BASE_PATH`,
 `PUBLIC_CLIP_BASE_URL`, all credentials) are required with no defaults
 in code, so the POC to dojo transition is entirely a matter of changing
 Railway variables and `brand_voice.txt`, never editing code.
+
+### Rolling posting schedule
+
+Bulk uploads roll out on a schedule instead of all posting at once.
+`POST_INTERVAL_HOURS` (default 24) is the minimum time between posts:
+24 = one clip per day, 12 = two per day, 0 = post everything as soon as
+it's found. Upload ten clips at once and, at the default, one posts per
+day, oldest upload first, until the queue drains.
+
+How it behaves:
+
+- New arrivals are validated immediately (once per clip) whatever the
+  schedule says, so a bad clip in a bulk upload gets its rejection email
+  within one cron run and never wastes a posting slot. Valid clips get a
+  "queued" confirmation email listing them.
+- The last-posted time persists on the host as
+  `socialClips/schedule_state.json`, so it survives redeploys. The
+  posting time stays stable day to day (an on-time post is credited to
+  its scheduled slot, so the cron's granularity doesn't make the time
+  creep later), and after a gap with an empty queue the schedule
+  restarts from the next post rather than bursting out backlog.
+- A partially published clip (one platform confirmed, the other failed)
+  is finished on the next run regardless of the schedule, since
+  half-posted is worse than two posts close together. Completing it
+  consumes that interval's slot.
+- Runs where nothing happened (clips waiting but not due yet, or
+  nothing pending at all) send no email, so a pause in video production
+  stays quiet. Emails only fire for posts, new queued clips,
+  rejections, or errors, and always include a queue status line when
+  clips are waiting.
 
 The cron schedule is managed in the Railway dashboard (Service >
 Settings > Cron Schedule; the POC runs `*/20 * * * *`, every 20
@@ -107,36 +138,39 @@ builder; each run:
 
 1. connects to the host over SFTP (`SFTP_BASE_PATH`, see below)
 2. lists complete pairs in `pending/` (an `.mp4` with a matching `.txt`;
-   half-uploaded singles are skipped until complete)
-3. downloads each pair and re-validates the video with ffprobe; a clip
-   that fails validation moves to `rejected/` on the host and is listed
-   in the email. If ffprobe itself is missing or broken, that's treated
-   as an environment error, not a rejected clip: the pair stays in
-   `pending/` and is reported as an error, so a build problem can never
-   permanently move a good clip out of `pending/`.
-4. generates the Instagram caption and YouTube title and description from
-   the uploaded text via the Anthropic API, using the voice defined in
-   `brand_voice.txt` (edit that file to change the tone; the POC to dojo
-   switch is just swapping that file)
-5. uploads to YouTube (Data API v3, `YT_PRIVACY_STATUS`, private by
-   default) and publishes to Instagram (Graph API Reels container flow;
-   Meta fetches the video from `PUBLIC_CLIP_BASE_URL`, so `pending/` must
-   be web-readable over HTTPS)
-6. moves the pair to `done/` only after BOTH platforms confirm. Publish
-   progress is saved per clip in `pending/<base>.state.json` on the host,
-   so a partial failure retries next run without double-posting the
-   platform that already succeeded.
-7. refreshes the Instagram long-lived token weekly. The live token is
+   half-uploaded singles are skipped until complete), oldest upload first
+3. validates NEW arrivals with ffprobe (once per clip, recorded in the
+   clip's state file): a clip that fails moves to `rejected/` and is
+   listed in the email; valid clips are queued. If ffprobe itself is
+   missing or broken, that's treated as an environment error, not a
+   rejected clip: the pair stays in `pending/` and is reported as an
+   error, so a build problem can never permanently move a good clip out
+   of `pending/`.
+4. finishes any partially published clip from a previous failed run
+   (ignores the posting schedule; see above)
+5. if a post is due per `POST_INTERVAL_HOURS`, takes the oldest queued
+   clip: generates the Instagram caption and YouTube title/description
+   via the Anthropic API using the voice in `brand_voice.txt`, uploads
+   to YouTube (`YT_PRIVACY_STATUS`, private by default), publishes to
+   Instagram (Graph API Reels container flow; Meta fetches the video
+   from `PUBLIC_CLIP_BASE_URL`, so `pending/` must be web-readable over
+   HTTPS), and moves the pair to `done/` only after BOTH platforms
+   confirm. Publish progress is saved per clip in
+   `pending/<base>.state.json`, so a partial failure retries next run
+   without double-posting the platform that already succeeded.
+6. refreshes the Instagram long-lived token weekly. The live token is
    persisted as `socialClips/ig_token.json` on the host (`IG_ACCESS_TOKEN`
    is only the bootstrap value, since the script cannot update Railway
    env vars).
-8. sends one plain-text Resend summary: what posted with links, what was
-   rejected and why, and any errors (no email when nothing happened)
+7. sends one plain-text Resend summary IF anything happened: posts with
+   links, newly queued clips, rejections with reasons, errors, and a
+   queue status line. Quiet runs send nothing.
 
 Set `PUBLISH_ENABLED=false` to run everything except the actual posting:
-clips are validated and their generated copy is previewed in the email,
-but nothing posts and nothing moves out of `pending/`. Useful for testing
-the plumbing before all credentials are in place.
+new clips are validated and queued, the clip that would post next gets
+its generated copy previewed in the email, but nothing posts, nothing
+moves to `done/`, and the schedule clock does not advance. Useful for
+testing the plumbing before all credentials are in place.
 
 Local test run (PowerShell): copy `.env.example` to `.env`, fill in values,
 `pip install -r requirements.txt`, install ffmpeg, then `python main.py`.

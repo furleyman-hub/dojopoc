@@ -39,20 +39,22 @@ class WatchFolder:
 
     def list_pending_pairs(self) -> list[str]:
         """Return base names in pending/ that have BOTH <base>.mp4 and
-        <base>.txt. An mp4 without its txt (or the reverse) is left alone;
-        it may still be mid-upload.
+        <base>.txt, ordered oldest upload first (by the mp4's modification
+        time on the host, name as tiebreak) so the posting schedule works
+        through a bulk upload in the order it arrived. An mp4 without its
+        txt (or the reverse) is left alone; it may still be mid-upload.
         """
-        names = set()
+        entries: dict[str, object] = {}
         for entry in self.sftp.listdir_attr(config.PENDING_DIR):
             if stat.S_ISREG(entry.st_mode):
-                names.add(entry.filename)
-        bases = []
-        for name in sorted(names):
+                entries[entry.filename] = entry
+        ordered: list[tuple[float, str]] = []
+        for name, entry in entries.items():
             if name.lower().endswith(".mp4"):
                 base = name[:-4]
-                if base + ".txt" in names:
-                    bases.append(base)
-        return bases
+                if base + ".txt" in entries:
+                    ordered.append((entry.st_mtime or 0, base))
+        return [base for _, base in sorted(ordered)]
 
     def download_pair(self, base: str, local_dir: str) -> tuple[str, str]:
         """Download <base>.mp4 and <base>.txt into local_dir.

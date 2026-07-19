@@ -41,6 +41,22 @@ PENDING_DIR = posixpath.join(SFTP_BASE_PATH, "pending")
 DONE_DIR = posixpath.join(SFTP_BASE_PATH, "done")
 REJECTED_DIR = posixpath.join(SFTP_BASE_PATH, "rejected")
 
+# Posting throttle for rolling schedules: at most one clip publishes per
+# this many hours (24 = one per day). 0 disables the throttle and posts
+# every valid clip as soon as it's found. Clips beyond the limit stay
+# queued in pending/ (validated once on arrival, marked in their state
+# file) and post oldest-first on later runs. The last-posted timestamp
+# persists on the SFTP host (schedule_state.json) since Railway
+# containers are ephemeral.
+_raw_interval = os.environ.get("POST_INTERVAL_HOURS", "24").strip() or "24"
+try:
+    POST_INTERVAL_HOURS = float(_raw_interval)
+except ValueError:
+    raise RuntimeError(
+        f"POST_INTERVAL_HOURS must be a number of hours, got {_raw_interval!r}"
+    )
+SCHEDULE_STATE_FILE = posixpath.join(SFTP_BASE_PATH, "schedule_state.json")
+
 # Notifications (Resend)
 RESEND_API_KEY = require_env("RESEND_API_KEY")
 NOTIFY_EMAIL = require_env("NOTIFY_EMAIL")
