@@ -13,9 +13,18 @@ import subprocess
 from pipeline import config
 
 
+class FFprobeNotFoundError(RuntimeError):
+    """ffprobe itself is missing, an environment problem, not a bad video.
+    Raised instead of returned so the caller doesn't reject the clip: a
+    missing binary means every clip would fail, and rejecting valid clips
+    over an environment problem would move them out of pending/ for good.
+    """
+
+
 def validate_video(path: str) -> tuple[bool, list[str]]:
     """Check one local MP4 against the agreed thresholds.
     Returns (ok, problems). problems is human-readable, for the email.
+    Raises FFprobeNotFoundError if ffprobe itself isn't available.
     """
     problems: list[str] = []
 
@@ -25,6 +34,8 @@ def validate_video(path: str) -> tuple[bool, list[str]]:
 
     try:
         probe = _ffprobe(path)
+    except FFprobeNotFoundError:
+        raise
     except Exception as exc:
         problems.append(f"ffprobe could not read the file ({exc})")
         return False, problems
@@ -58,19 +69,25 @@ def validate_video(path: str) -> tuple[bool, list[str]]:
 
 
 def _ffprobe(path: str) -> dict:
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v", "error",
-            "-print_format", "json",
-            "-show_format",
-            "-show_streams",
-            path,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-print_format", "json",
+                "-show_format",
+                "-show_streams",
+                path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except FileNotFoundError as exc:
+        raise FFprobeNotFoundError(
+            "ffprobe is not installed or not on PATH (check the Railway build "
+            "actually installed ffmpeg; see nixpacks.toml)"
+        ) from exc
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or f"exit code {result.returncode}")
     return json.loads(result.stdout)

@@ -76,14 +76,19 @@ Set these env vars on the Railway service (see `.env.example`):
 `ANTHROPIC_API_KEY`, and optionally `NOTIFY_FROM` (a verified Resend
 sender), `CAPTION_MODEL`, and `BRAND_VOICE_FILE`.
 
-`nixpacks.toml` installs ffmpeg (for ffprobe) and starts `python main.py`.
-`railway.json` sets a cron schedule of every 20 minutes; each run:
+`nixpacks.toml` installs ffmpeg (for ffprobe) via a Nix package and starts
+`python main.py`. `railway.json` forces the Nixpacks builder and sets a
+cron schedule of every 20 minutes; each run:
 
-1. connects to the host over SFTP (account is jailed to `socialClips/`)
+1. connects to the host over SFTP (`SFTP_BASE_PATH`, see below)
 2. lists complete pairs in `pending/` (an `.mp4` with a matching `.txt`;
    half-uploaded singles are skipped until complete)
-3. downloads each pair and re-validates the video with ffprobe;
-   failures move to `rejected/` on the host and are listed in the email
+3. downloads each pair and re-validates the video with ffprobe; a clip
+   that fails validation moves to `rejected/` on the host and is listed
+   in the email. If ffprobe itself is missing or broken, that's treated
+   as an environment error, not a rejected clip: the pair stays in
+   `pending/` and is reported as an error, so a build problem can never
+   permanently move a good clip out of `pending/`.
 4. generates the Instagram caption and YouTube title and description from
    the uploaded text via the Anthropic API, using the voice defined in
    `brand_voice.txt` (edit that file to change the tone; the POC to dojo
