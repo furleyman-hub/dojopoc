@@ -1,12 +1,25 @@
-"""Dojo social pipeline, scheduled entry point.
+"""Dojo social pipeline, scheduled entry point. One run:
 
-Current stage (build order step 4): SFTP scan, download, ffprobe validation,
-move rejects, caption generation, email summary. Publishing (YouTube,
-Instagram) is not built yet, so valid clips are reported (with their
-generated copy, as a preview) but LEFT IN pending/. Once publishing lands,
-valid clips will move to done/ only after both platforms confirm.
+1. connect to the web host over SFTP and list complete pairs in pending/
+2. download and re-validate each video with ffprobe; failures move to
+   rejected/ and are reported
+3. generate platform copy from the description (Anthropic API)
+4. publish to YouTube and Instagram; a pair moves to done/ only after
+   BOTH platforms confirm
+5. send one plain-text Resend summary
+
+Partial failure handling: publish progress is persisted per clip in
+pending/<base>.state.json on the host (generated copy, YouTube result,
+Instagram result). A later run resumes from that state, so a platform
+that already succeeded is never posted twice, and the pair stays in
+pending/ until both have succeeded.
+
+PUBLISH_ENABLED=false skips step 4: clips are validated and their copy
+is previewed in the email, but nothing posts and nothing moves to done/.
 """
 
+import json
+import posixpath
 import sys
 import tempfile
 import traceback
@@ -14,7 +27,10 @@ from datetime import datetime, timezone
 
 from pipeline import config, notify
 from pipeline.captions import generate_captions
+from pipeline.publish_instagram import publish_to_instagram
+from pipeline.publish_youtube import publish_to_youtube
 from pipeline.sftp_client import WatchFolder
+from pipeline.token_refresh import get_ig_access_token
 from pipeline.validate import validate_video
 
 
@@ -24,11 +40,16 @@ def log(msg: str) -> None:
 
 
 def run() -> int:
-    valid: list[dict] = []                 # {base, description, copy}
+    posted: list[dict] = []      # {base, youtube, instagram}
+    previewed: list[dict] = []   # {base, description, copy} (publish disabled)
     rejected: list[tuple[str, str]] = []   # (base, reasons)
     errors: list[str] = []
+    ig_token = None
 
     log("Pipeline run starting")
+    if not config.PUBLISH_ENABLED:
+        log("PUBLISH_ENABLED=false: preview mode, nothing will post")
+
     try:
         with WatchFolder() as folder, tempfile.TemporaryDirectory() as workdir:
             pairs = folder.list_pending_pairs()
@@ -42,20 +63,64 @@ def run() -> int:
                         description = fh.read().strip()
 
                     ok, problems = validate_video(video_path)
-                    if ok:
-                        log(f"  valid: {base}, generating captions")
-                        copy = generate_captions(description)
-                        log(f"  captions ready for {base}")
-                        valid.append(
-                            {"base": base, "description": description, "copy": copy}
-                        )
-                        # Publishing not built yet: leave the pair in pending/
-                        # so a later run picks it up once publishing exists.
-                    else:
+                    if not ok:
                         reasons = "; ".join(problems)
                         log(f"  rejected: {base} ({reasons})")
                         folder.move_pair(base, config.REJECTED_DIR)
+                        _move_state(folder, base, config.REJECTED_DIR)
                         rejected.append((base, reasons))
+                        continue
+
+                    state = _load_state(folder, base)
+
+                    if "copy" not in state:
+                        log(f"  generating captions for {base}")
+                        state["copy"] = generate_captions(description)
+                        if config.PUBLISH_ENABLED:
+                            _save_state(folder, base, state)
+                    copy = state["copy"]
+
+                    if not config.PUBLISH_ENABLED:
+                        previewed.append(
+                            {"base": base, "description": description, "copy": copy}
+                        )
+                        continue
+
+                    if "youtube" not in state:
+                        log(f"  uploading {base} to YouTube")
+                        state["youtube"] = publish_to_youtube(
+                            video_path,
+                            copy["youtube_title"],
+                            copy["youtube_description"],
+                        )
+                        _save_state(folder, base, state)
+                        log(f"  YouTube done: {state['youtube']['url']}")
+                    else:
+                        log(f"  YouTube already done for {base} (from state)")
+
+                    if "instagram" not in state:
+                        if ig_token is None:
+                            ig_token = get_ig_access_token(folder)
+                        log(f"  publishing {base} to Instagram")
+                        state["instagram"] = publish_to_instagram(
+                            base, copy["instagram_caption"], ig_token
+                        )
+                        _save_state(folder, base, state)
+                        log(f"  Instagram done: {state['instagram']['id']}")
+                    else:
+                        log(f"  Instagram already done for {base} (from state)")
+
+                    # Both platforms confirmed: only now leave pending/.
+                    folder.move_pair(base, config.DONE_DIR)
+                    _move_state(folder, base, config.DONE_DIR)
+                    posted.append(
+                        {
+                            "base": base,
+                            "youtube": state["youtube"],
+                            "instagram": state["instagram"],
+                        }
+                    )
+                    log(f"  {base} fully published, moved to done/")
                 except Exception:
                     err = f"{base}: {traceback.format_exc(limit=3)}"
                     log(f"  ERROR on {err}")
@@ -65,9 +130,9 @@ def run() -> int:
         log(f"FATAL: {err}")
         errors.append(f"Run failed before processing completed:\n{err}")
 
-    if valid or rejected or errors:
+    if posted or previewed or rejected or errors:
         try:
-            notify.send_summary(*build_summary(valid, rejected, errors))
+            notify.send_summary(*build_summary(posted, previewed, rejected, errors))
             log("Summary email sent")
         except Exception:
             log(f"Could not send summary email: {traceback.format_exc(limit=3)}")
@@ -78,14 +143,46 @@ def run() -> int:
     return 1 if errors else 0
 
 
+def _state_path(directory: str, base: str) -> str:
+    return posixpath.join(directory, base + ".state.json")
+
+
+def _load_state(folder: WatchFolder, base: str) -> dict:
+    raw = folder.read_text(_state_path(config.PENDING_DIR, base))
+    if raw is None:
+        return {}
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return {}
+
+
+def _save_state(folder: WatchFolder, base: str, state: dict) -> None:
+    folder.write_text(
+        _state_path(config.PENDING_DIR, base), json.dumps(state, indent=2)
+    )
+
+
+def _move_state(folder: WatchFolder, base: str, dest_dir: str) -> None:
+    try:
+        folder.move_file(
+            _state_path(config.PENDING_DIR, base), _state_path(dest_dir, base)
+        )
+    except OSError:
+        pass  # no state file for this pair yet
+
+
 def build_summary(
-    valid: list[dict],
+    posted: list[dict],
+    previewed: list[dict],
     rejected: list[tuple[str, str]],
     errors: list[str],
 ) -> tuple[str, str]:
     parts = []
-    if valid:
-        parts.append(f"{len(valid)} valid")
+    if posted:
+        parts.append(f"{len(posted)} posted")
+    if previewed:
+        parts.append(f"{len(previewed)} previewed")
     if rejected:
         parts.append(f"{len(rejected)} rejected")
     if errors:
@@ -93,11 +190,19 @@ def build_summary(
     subject = "Dojo clips: " + ", ".join(parts)
 
     lines = []
-    if valid:
-        lines.append("Valid clips (publishing not built yet, left in pending/).")
-        lines.append("Generated copy below is a preview of what will post:")
+    if posted:
+        lines.append("Posted to both platforms (moved to done/):")
+        for item in posted:
+            lines.append(f"  {item['base']}.mp4")
+            lines.append(f"    YouTube: {item['youtube']['url']}")
+            ig = item["instagram"]
+            lines.append(f"    Instagram: {ig.get('permalink') or 'media id ' + ig['id']}")
         lines.append("")
-        for item in valid:
+    if previewed:
+        lines.append("Validated, publish disabled (left in pending/).")
+        lines.append("Generated copy preview:")
+        lines.append("")
+        for item in previewed:
             copy = item["copy"]
             lines.append(f"  {item['base']}.mp4")
             lines.append(f'    description: "{item["description"]}"')
@@ -114,7 +219,8 @@ def build_summary(
             lines.append(f"  {base}.mp4: {reasons}")
         lines.append("")
     if errors:
-        lines.append("Errors:")
+        lines.append("Errors (pairs left in pending/, will retry next run without")
+        lines.append("double-posting anything that already succeeded):")
         for err in errors:
             lines.append(f"  {err}")
         lines.append("")

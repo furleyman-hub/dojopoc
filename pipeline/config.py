@@ -44,6 +44,34 @@ BRAND_VOICE_FILE = os.environ.get("BRAND_VOICE_FILE", "").strip() or os.path.joi
     _REPO_ROOT, "brand_voice.txt"
 )
 
+# Publishing. PUBLISH_ENABLED=false runs everything except the actual
+# posting (validation + captions + email preview), useful while testing
+# the plumbing or before all credentials are in place.
+PUBLISH_ENABLED = os.environ.get("PUBLISH_ENABLED", "true").strip().lower() not in (
+    "false", "0", "no", "off",
+)
+
+# Public HTTPS base for clips in pending/ (Instagram fetches the video
+# server-side from a URL; it cannot be pushed as bytes)
+PUBLIC_CLIP_BASE_URL = os.environ.get(
+    "PUBLIC_CLIP_BASE_URL", "https://dojopoc.julianfox.com/socialClips/pending"
+).strip().rstrip("/")
+
+# YouTube. Test uploads stay private until final testing (spec section 3);
+# flip YT_PRIVACY_STATUS to "public" when ready.
+YT_PRIVACY_STATUS = os.environ.get("YT_PRIVACY_STATUS", "private").strip()
+YT_CATEGORY_ID = os.environ.get("YT_CATEGORY_ID", "17").strip()  # 17 = Sports
+
+# Instagram token refresh cadence (spec section 6.1: weekly is plenty;
+# token must be at least 24h old to refresh)
+IG_TOKEN_FILE = "ig_token.json"          # persisted on the SFTP host
+IG_REFRESH_INTERVAL_DAYS = 7
+
+# Credentials that are only needed when actually publishing are validated
+# at use time with require_env(), not at import, so the pipeline can run
+# with PUBLISH_ENABLED=false before every credential exists:
+#   YT_CLIENT_SECRET_JSON, YT_REFRESH_TOKEN, IG_ACCESS_TOKEN, IG_USER_ID
+
 # Validation thresholds (spec section 5)
 MAX_DURATION_SECONDS = 90
 MAX_FILE_MB = 500

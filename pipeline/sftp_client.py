@@ -87,3 +87,27 @@ class WatchFolder:
     def file_size(self, base: str) -> int:
         """Size in bytes of <base>.mp4 in pending/ (for a pre-download check)."""
         return self.sftp.stat(posixpath.join(config.PENDING_DIR, base + ".mp4")).st_size
+
+    # Small-file helpers (publish state, persisted IG token). Paths are
+    # relative to the SFTP home (socialClips/).
+
+    def read_text(self, path: str) -> str | None:
+        """Contents of a small text file on the host, or None if missing."""
+        try:
+            with self.sftp.open(path, "r") as fh:
+                return fh.read().decode("utf-8")
+        except FileNotFoundError:
+            return None
+
+    def write_text(self, path: str, content: str) -> None:
+        with self.sftp.open(path, "w") as fh:
+            fh.write(content)
+
+    def move_file(self, src: str, dst: str) -> None:
+        self._rename(src, dst)
+
+    def delete_file(self, path: str) -> None:
+        try:
+            self.sftp.remove(path)
+        except FileNotFoundError:
+            pass

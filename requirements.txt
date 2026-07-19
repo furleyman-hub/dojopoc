@@ -4,7 +4,9 @@ requests>=2.31
 python-dotenv>=1.0
 anthropic>=0.69
 
-# One-time local script only (scripts/get_youtube_refresh_token.py) and,
-# later, YouTube publishing
+# YouTube (google-auth-oauthlib is only used by the one-time local script
+# scripts/get_youtube_refresh_token.py)
 google-auth>=2.29
 google-auth-oauthlib>=1.2
+google-api-python-client>=2.140
+google-auth-httplib2>=0.2

@@ -10,10 +10,10 @@ everything after that is automated. Full spec: `dojo-social-automation-handoff.m
 2. [x] Web upload page + PHP endpoint
 3. [x] Pipeline skeleton: SFTP scan/download/move + ffprobe validation + Resend summary (no publishing yet)
 4. [x] Caption generation (Anthropic API)
-5. [ ] YouTube publishing (private visibility for tests)
-6. [ ] Instagram publishing (container flow)
-7. [ ] IG token refresh job
-8. [ ] Railway cron schedule + end-to-end test
+5. [x] YouTube publishing (private visibility for tests)
+6. [x] Instagram publishing (container flow)
+7. [x] IG token refresh job
+8. [x] Railway cron config; end-to-end test with real credentials still to run
 
 ## Layout
 
@@ -24,8 +24,12 @@ pipeline/
   sftp_client.py        watch folder access (pending/done/rejected)
   validate.py           ffprobe checks
   captions.py           Anthropic API: description to per-platform copy
+  publish_youtube.py    YouTube Data API v3 upload (non-interactive auth)
+  publish_instagram.py  Graph API Reels container flow
+  token_refresh.py      IG long-lived token: persist on host, refresh weekly
   notify.py             Resend summary email
 brand_voice.txt         editable voice/style config for caption generation
+railway.json            cron schedule (every 20 min) for Railway
 web/                    deploy manually to TigerTech (not by Railway)
   social-upload.html    upload page: per-clip description, immediate upload
   social-upload.php     saves <base>.mp4 + <base>.txt into socialClips/pending/
@@ -73,42 +77,66 @@ Set these env vars on the Railway service (see `.env.example`):
 sender), `CAPTION_MODEL`, and `BRAND_VOICE_FILE`.
 
 `nixpacks.toml` installs ffmpeg (for ffprobe) and starts `python main.py`.
-Each run:
+`railway.json` sets a cron schedule of every 20 minutes; each run:
 
 1. connects to the host over SFTP (account is jailed to `socialClips/`)
 2. lists complete pairs in `pending/` (an `.mp4` with a matching `.txt`;
    half-uploaded singles are skipped until complete)
-3. downloads each pair and re-validates the video with ffprobe
-4. failures move to `rejected/` on the host and are listed in the email
-5. for valid clips, generates the Instagram caption and YouTube title and
-   description from the uploaded text via the Anthropic API, using the
-   voice defined in `brand_voice.txt` (edit that file to change the tone;
-   the POC to dojo switch is just swapping that file)
-6. valid clips are reported in the email with their generated copy as a
-   preview, but left in `pending/`, because publishing is not built yet;
-   nothing posts anywhere at this stage. Note: until publishing lands,
-   a valid clip left in pending regenerates its captions on every run,
-   so do not put this on a cron schedule yet (scheduling is step 8).
-7. sends one plain-text Resend summary (no email when nothing happened)
+3. downloads each pair and re-validates the video with ffprobe;
+   failures move to `rejected/` on the host and are listed in the email
+4. generates the Instagram caption and YouTube title and description from
+   the uploaded text via the Anthropic API, using the voice defined in
+   `brand_voice.txt` (edit that file to change the tone; the POC to dojo
+   switch is just swapping that file)
+5. uploads to YouTube (Data API v3, `YT_PRIVACY_STATUS`, private by
+   default) and publishes to Instagram (Graph API Reels container flow;
+   Meta fetches the video from `PUBLIC_CLIP_BASE_URL`, so `pending/` must
+   be web-readable over HTTPS)
+6. moves the pair to `done/` only after BOTH platforms confirm. Publish
+   progress is saved per clip in `pending/<base>.state.json` on the host,
+   so a partial failure retries next run without double-posting the
+   platform that already succeeded.
+7. refreshes the Instagram long-lived token weekly. The live token is
+   persisted as `socialClips/ig_token.json` on the host (`IG_ACCESS_TOKEN`
+   is only the bootstrap value, since the script cannot update Railway
+   env vars).
+8. sends one plain-text Resend summary: what posted with links, what was
+   rejected and why, and any errors (no email when nothing happened)
+
+Set `PUBLISH_ENABLED=false` to run everything except the actual posting:
+clips are validated and their generated copy is previewed in the email,
+but nothing posts and nothing moves out of `pending/`. Useful for testing
+the plumbing before all credentials are in place.
 
 Local test run (PowerShell): copy `.env.example` to `.env`, fill in values,
 `pip install -r requirements.txt`, install ffmpeg, then `python main.py`.
 Note: in PowerShell use `curl.exe` for any raw API checks, plain `curl` is
 an alias for `Invoke-WebRequest`.
 
-Scheduling on Railway (cron every 15 to 30 minutes) is build step 8, after
-publishing works.
+## Final testing checklist (the remaining human steps)
 
-## Notes for the remaining steps
+1. Run the one-time YouTube refresh token script (setup section above) and
+   set all env vars on Railway.
+2. Confirm `https://dojopoc.julianfox.com/socialClips/pending/` serves
+   files over HTTPS (Instagram fetches the video from there). If the
+   directory is not web-readable, fix that or point
+   `PUBLIC_CLIP_BASE_URL` at a staging path that is.
+3. First pass with `PUBLISH_ENABLED=false`: upload a test clip, run once,
+   check the preview email.
+4. Flip `PUBLISH_ENABLED=true`, run once: YouTube post lands as private,
+   Instagram Reel goes live on the test account, pair moves to `done/`.
+5. When satisfied, set `YT_PRIVACY_STATUS=public` for real visibility.
+6. Regenerate `IG_APP_SECRET` in the Meta dashboard (it was exposed once
+   during setup) and update the env var.
 
-- Valid clips currently stay in `pending/`. When publishing lands, a pair
-  moves to `done/` only after BOTH platforms confirm; partial failures must
-  not double-post the platform that succeeded.
-- `IG_APP_SECRET` was exposed once during setup. Regenerate it in the Meta
-  dashboard before production.
-- IG long-lived token expires around Sept 16, 2026 unless refreshed
-  (spec section 6.1).
-- Keep `callback.php` on the subdomain root; it is needed if Instagram auth
-  must ever be redone.
-- Brand voice for caption generation should live in a small editable config,
-  since the POC will be redeployed for the dojo's real accounts.
+## Standing notes
+
+- IG long-lived token expires around Sept 16, 2026 unless refreshed; the
+  weekly refresh job rolls it forward 60 days each time. If it ever fully
+  expires, redo the manual OAuth flow via `callback.php` (spec section
+  6.1; the App Dashboard "Generate token" button does NOT work).
+- Keep `callback.php` on the subdomain root.
+- Consider purging `done/` after a retention period; clips there are
+  web-readable if the directory is.
+- Quota is roughly 100 API-published Instagram posts per 24h, irrelevant
+  at this volume.
