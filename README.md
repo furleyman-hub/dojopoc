@@ -95,8 +95,13 @@ place page on every Reel for local discovery; if Instagram rejects the
 id the clip still posts untagged) and `YT_DEFAULT_LANGUAGE` /
 `YT_DEFAULT_AUDIO_LANGUAGE` (BCP-47 codes like `en`; the audio one
 falls back to the first). YouTube uploads also carry search tags
-generated alongside the captions; no config needed for that. The
-account-specific ones (`SFTP_BASE_PATH`,
+generated alongside the captions; no config needed for that.
+`AUDIENCE_WINDOW_ENABLED` (default true) refreshes Instagram's
+online_followers insight weekly and holds due clips for the daily
+`AUDIENCE_WINDOW_HOURS`-hour (default 3) block when the most followers
+are online; without insights access or enough followers it logs why
+into `socialClips/posting_window.json` and posts whenever due, the old
+behavior. The account-specific ones (`SFTP_BASE_PATH`,
 `PUBLIC_CLIP_BASE_URL`, all credentials) are required with no defaults
 in code, so the POC to dojo transition is entirely a matter of changing
 Railway variables and `brand_voice.txt`, never editing code.

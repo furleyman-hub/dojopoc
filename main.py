@@ -49,7 +49,7 @@ import tempfile
 import traceback
 from datetime import datetime, timedelta, timezone
 
-from pipeline import config, notify
+from pipeline import audience_window, config, notify
 from pipeline.captions import generate_captions
 from pipeline.publish_instagram import publish_to_instagram
 from pipeline.publish_youtube import publish_to_youtube
@@ -87,6 +87,7 @@ def run() -> int:
     errors: list[str] = []
     waiting: list[str] = []      # validated clips still queued after this run
     schedule: dict = {}
+    window: dict | None = None
     ig_holder = {"token": None}
 
     log(f"Pipeline run starting (commit {commit})")
@@ -136,6 +137,20 @@ def run() -> int:
 
             schedule = _load_schedule(folder)
 
+            def _ig_token() -> str:
+                if ig_holder["token"] is None:
+                    ig_holder["token"] = get_ig_access_token(folder)
+                return ig_holder["token"]
+
+            # Audience-informed posting window: a due clip additionally
+            # waits for the daily block when the most followers are
+            # online. None (no data yet, insights unavailable, feature
+            # off) means no restriction. The refresh inside is at most
+            # weekly and failures only log, never abort the run.
+            window = audience_window.get_posting_window(folder, _ig_token)
+            if window is not None:
+                log(f"Audience posting window: {audience_window.describe(window)}")
+
             # Phase 2: finish partially published clips first, ignoring the
             # throttle: one platform is already live, and leaving the other
             # half unposted for a day is worse than two posts close
@@ -168,7 +183,7 @@ def run() -> int:
                 and "youtube" not in states[b] and "instagram" not in states[b]
             ]
             if config.PUBLISH_ENABLED:
-                while fresh and _is_due(schedule):
+                while fresh and _is_due(schedule, window):
                     base = fresh.pop(0)
                     try:
                         log(f"Posting {base} (its turn in the schedule)")
@@ -183,7 +198,7 @@ def run() -> int:
                         # may be platform-wide, and this clip (possibly now
                         # half-posted) must resume before anything else.
                         break
-            elif fresh and _is_due(schedule):
+            elif fresh and _is_due(schedule, window):
                 base = fresh[0]
                 try:
                     video_path, text_path = _fetch_pair(folder, base, workdir, local)
@@ -202,7 +217,10 @@ def run() -> int:
 
             waiting = fresh
             if waiting:
-                log(f"{len(waiting)} clip(s) waiting in the queue{_next_post_hint(schedule)}")
+                log(
+                    f"{len(waiting)} clip(s) waiting in the queue"
+                    f"{_next_post_hint(schedule, window)}"
+                )
     except Exception:
         err = traceback.format_exc(limit=5)
         log(f"FATAL: {err}")
@@ -215,7 +233,8 @@ def run() -> int:
     if posted or previewed or queued or rejected or errors:
         try:
             notify.send_summary(*build_summary(
-                posted, previewed, queued, rejected, errors, waiting, schedule, commit
+                posted, previewed, queued, rejected, errors, waiting, schedule,
+                commit, window,
             ))
             log("Summary email sent")
         except Exception:
@@ -311,7 +330,13 @@ def _parse_ts(value) -> datetime | None:
     return parsed
 
 
-def _is_due(schedule: dict) -> bool:
+def _is_due(schedule: dict, window: dict | None = None) -> bool:
+    # The audience window gates everything, including the very first
+    # post and POST_INTERVAL_HOURS=0: draining the queue still happens
+    # within the hours the audience is actually online. window=None
+    # (feature off or no data) imposes nothing.
+    if not audience_window.in_window(window):
+        return False
     if config.POST_INTERVAL_HOURS <= 0:
         return True
     last = _parse_ts(schedule.get("last_posted_at"))
@@ -341,14 +366,18 @@ def _advance_schedule(folder: WatchFolder, schedule: dict) -> None:
     folder.write_text(config.SCHEDULE_STATE_FILE, json.dumps(schedule, indent=2))
 
 
-def _next_post_hint(schedule: dict) -> str:
+def _next_post_hint(schedule: dict, window: dict | None = None) -> str:
+    window_note = ""
+    desc = audience_window.describe(window)
+    if desc:
+        window_note = f", within the audience window {desc}"
     if config.POST_INTERVAL_HOURS <= 0:
-        return ""
+        return window_note
     last = _parse_ts(schedule.get("last_posted_at"))
     if last is None:
-        return "; next post: next run"
+        return "; next post: next run" + window_note
     nxt = last + timedelta(hours=config.POST_INTERVAL_HOURS)
-    return f"; next post due after {nxt.strftime('%Y-%m-%d %H:%M UTC')}"
+    return f"; next post due after {nxt.strftime('%Y-%m-%d %H:%M UTC')}" + window_note
 
 
 # ---- SFTP debug tree ----
@@ -430,6 +459,7 @@ def build_summary(
     waiting: list[str],
     schedule: dict,
     commit: str = "unknown",
+    window: dict | None = None,
 ) -> tuple[str, str]:
     parts = []
     if posted:
@@ -491,7 +521,7 @@ def build_summary(
     if waiting:
         lines.append(
             f"Queue status: {len(waiting)} clip(s) waiting in pending/"
-            + _next_post_hint(schedule)
+            + _next_post_hint(schedule, window)
         )
         lines.append("")
     return subject, "\n".join(lines)

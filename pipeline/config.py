@@ -103,6 +103,26 @@ YT_DEFAULT_AUDIO_LANGUAGE = (
 # container call is byte-identical to Phase 1.
 IG_LOCATION_ID = os.environ.get("IG_LOCATION_ID", "").strip()
 
+# Audience-informed posting window. When enabled, the online_followers
+# insight (followers online per UTC hour) is refreshed weekly and a due
+# clip additionally waits for the best AUDIENCE_WINDOW_HOURS-hour block
+# of the day before posting. Any failure (missing insights permission,
+# too few followers, API error) falls back to posting whenever due,
+# exactly the pre-feature behavior. State persists on the SFTP host.
+AUDIENCE_WINDOW_ENABLED = os.environ.get(
+    "AUDIENCE_WINDOW_ENABLED", "true"
+).strip().lower() not in ("false", "0", "no", "off")
+_raw_window_hours = os.environ.get("AUDIENCE_WINDOW_HOURS", "3").strip() or "3"
+try:
+    AUDIENCE_WINDOW_HOURS = int(_raw_window_hours)
+except ValueError:
+    raise RuntimeError(
+        f"AUDIENCE_WINDOW_HOURS must be a whole number of hours, got {_raw_window_hours!r}"
+    )
+AUDIENCE_WINDOW_REFRESH_DAYS = 7
+AUDIENCE_WINDOW_RETRY_HOURS = 24
+AUDIENCE_WINDOW_FILE = posixpath.join(SFTP_BASE_PATH, "posting_window.json")
+
 # Instagram token refresh cadence (spec section 6.1: weekly is plenty;
 # token must be at least 24h old to refresh)
 IG_TOKEN_FILE = posixpath.join(SFTP_BASE_PATH, "ig_token.json")  # persisted on the SFTP host
