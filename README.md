@@ -83,28 +83,90 @@ independently with its own status.
 
 ### 3. Pipeline (Railway)
 
-Set these env vars on the Railway service (see `.env.example` for the
-POC values): `SFTP_HOST`, `SFTP_USER`, `SFTP_PASS`, `SFTP_BASE_PATH`,
-`PUBLIC_CLIP_BASE_URL`, `RESEND_API_KEY`, `NOTIFY_EMAIL`,
-`ANTHROPIC_API_KEY`, `YT_CLIENT_ID`, `YT_CLIENT_SECRET`,
-`YT_REFRESH_TOKEN`, `IG_ACCESS_TOKEN`, `IG_USER_ID`, and optionally
-`NOTIFY_FROM` (a verified Resend sender), `CAPTION_MODEL`,
-`BRAND_VOICE_FILE`, `POST_INTERVAL_HOURS` (see below; defaults to
-24), and the distribution levers `IG_LOCATION_ID` (tag the dojo's own
-place page on every Reel for local discovery; if Instagram rejects the
-id the clip still posts untagged) and `YT_DEFAULT_LANGUAGE` /
-`YT_DEFAULT_AUDIO_LANGUAGE` (BCP-47 codes like `en`; the audio one
-falls back to the first). YouTube uploads also carry search tags
-generated alongside the captions; no config needed for that.
-`AUDIENCE_WINDOW_ENABLED` (default true) refreshes Instagram's
-online_followers insight weekly and holds due clips for the daily
-`AUDIENCE_WINDOW_HOURS`-hour (default 3) block when the most followers
-are online; without insights access or enough followers it logs why
-into `socialClips/posting_window.json` and posts whenever due, the old
-behavior. The account-specific ones (`SFTP_BASE_PATH`,
-`PUBLIC_CLIP_BASE_URL`, all credentials) are required with no defaults
-in code, so the POC to dojo transition is entirely a matter of changing
-Railway variables and `brand_voice.txt`, never editing code.
+All env vars are read in `pipeline/config.py`; `.env.example` has the
+same list with the POC's actual values filled in where useful. The
+account-specific ones (host, paths, credentials) are required with no
+defaults in code, so a forgotten variable fails the run loudly instead
+of quietly touching the wrong account, and the POC to dojo transition
+is entirely a matter of changing Railway variables plus
+`brand_voice.txt`, never editing code.
+
+#### Required, no default (the run fails immediately if missing)
+
+| Variable | What it should contain |
+|---|---|
+| `SFTP_HOST` | Hostname of the TigerTech SFTP login. |
+| `SFTP_USER` | SFTP username. |
+| `SFTP_PASS` | SFTP password. |
+| `SFTP_BASE_PATH` | Absolute filesystem path (not relative, the account is not chrooted) to the `socialClips` folder, e.g. `/var/www/html/ju/julianfox.com/dojopoc/socialClips`. Confirm via FileZilla for a new hosting account; see "If SFTP can't find pending/done/rejected" below if it's wrong. |
+| `PUBLIC_CLIP_BASE_URL` | Public HTTPS URL that serves the `pending/` directory's contents, e.g. `https://dojopoc.julianfox.com/socialClips/pending`. Instagram's Graph API fetches the video server-side from this URL, it does not accept an uploaded file. |
+| `RESEND_API_KEY` | API key from the Resend account used for summary emails. |
+| `NOTIFY_EMAIL` | Address that receives the run summary emails. |
+| `ANTHROPIC_API_KEY` | Anthropic API key, used to generate captions/title/description/tags. |
+
+#### Required only when actually publishing (validated at use time, so `PUBLISH_ENABLED=false` works before these exist)
+
+| Variable | What it should contain |
+|---|---|
+| `YT_CLIENT_ID` | OAuth Client ID, from Google Cloud Console > Credentials > OAuth 2.0 Client IDs > the Desktop client. Preferred over `YT_CLIENT_SECRET_JSON`. |
+| `YT_CLIENT_SECRET` | The matching OAuth Client secret, copied as its own plain value from the same Console page. Do not paste this into `YT_CLIENT_SECRET_JSON`. |
+| `YT_CLIENT_SECRET_JSON` | Alternative to the two vars above: the full downloaded `client_secret.json` file's content, or a path to that file on disk. Leave blank if using `YT_CLIENT_ID`/`YT_CLIENT_SECRET`. |
+| `YT_REFRESH_TOKEN` | Minted once by running `scripts/get_youtube_refresh_token.py` locally (see Setup section 1 above). |
+| `IG_ACCESS_TOKEN` | Bootstrap value only, used the first time the pipeline runs. After that the live token is persisted and self-refreshed at `socialClips/ig_token.json` on the host. |
+| `IG_USER_ID` | The Instagram Business/Creator account's numeric user ID (the POC value is `17841412338243421`; the dojo account will have its own). |
+
+#### Optional, with defaults
+
+| Variable | Default | What it should contain |
+|---|---|---|
+| `SFTP_PORT` | `22` | SFTP port, only needed if TigerTech ever changes it. |
+| `NOTIFY_FROM` | `onboarding@resend.dev` | Sender address for summary emails. The default only delivers to your own Resend account email; set a verified sender for real delivery to other inboxes. |
+| `CAPTION_MODEL` | `claude-opus-4-8` | Anthropic model ID used for caption/tag generation. |
+| `BRAND_VOICE_FILE` | `brand_voice.txt` (repo root) | Path to the editable voice/style text file `pipeline/captions.py` reads on every run. Editing this file needs no redeploy. |
+| `PUBLISH_ENABLED` | `true` | Set `false` to run validation + caption generation + email preview only, nothing actually posts or moves to `done/`, and the schedule clock does not advance. Useful before all credentials exist or to sanity-check copy before it goes live. |
+| `POST_INTERVAL_HOURS` | `24` | Minimum hours between posts (rolling schedule). `24` = one clip per day, `12` = two per day, `0` = post every valid clip immediately, draining the whole queue in one run. |
+| `YT_PRIVACY_STATUS` | `private` | `private` while testing, `public` for real visibility. Currently set to `public` on Railway. |
+| `YT_CATEGORY_ID` | `17` (Sports) | YouTube category ID for uploaded videos; see Google's category ID list if this ever needs to change. |
+| `YT_DEFAULT_LANGUAGE` | empty (field omitted) | BCP-47 language code for the video's metadata language, e.g. `en`. |
+| `YT_DEFAULT_AUDIO_LANGUAGE` | falls back to `YT_DEFAULT_LANGUAGE` | BCP-47 code for the spoken audio language. Only set this separately if it should differ from `YT_DEFAULT_LANGUAGE`. |
+| `IG_LOCATION_ID` | empty (no tag) | Facebook **Places** page ID (not a generic Facebook Page ID) for the dojo's physical location, tagged on every Reel for local discovery. Find it via Graph API Explorer: `GET /search?type=place&q=<dojo name>&center=<lat>,<lng>`, matched against the dojo's real address. If Instagram rejects the ID, the run logs why and posts untagged rather than failing the clip. |
+| `AUDIENCE_WINDOW_ENABLED` | `true` | Set `false` to disable the audience-timing feature below entirely and always post whenever `POST_INTERVAL_HOURS` says a post is due. |
+| `AUDIENCE_WINDOW_HOURS` | `3` | Width, in hours, of the daily posting window computed from Instagram's `online_followers` insight (see below). Whole numbers only; `24`+ effectively disables the gating without turning the feature off. |
+| `SFTP_DEBUG_LIST_TREE` | `false` | Set `true` for one run to email a recursive directory listing instead of processing clips; see "If SFTP can't find pending/done/rejected" below. |
+| `SFTP_DEBUG_LIST_PATH` | `.` (SFTP login's default directory) | Starting path for the debug listing above; try `/` for the true filesystem root. |
+
+#### Diagnostic-only, not read by the running pipeline
+
+| Variable | What it should contain |
+|---|---|
+| `IG_APP_ID` | Meta App ID, held for a possible future manual OAuth redo (spec section 6.1). |
+| `IG_APP_SECRET` | Meta App Secret, same purpose. Was exposed once during setup and should be regenerated in the Meta dashboard before this goes fully live. |
+
+### Distribution features (Phase 2)
+
+Two small, additive levers plus one adaptive one, all designed so an
+unset/failed config behaves exactly like Phase 1:
+
+- **Instagram location tagging** (`IG_LOCATION_ID`): tags the dojo's
+  Facebook Places page on every Reel for local discovery. A wrong or
+  unsupported ID is logged and the clip posts untagged rather than
+  failing; see the table above for how to find the correct ID (it must
+  be a Places page with an address, not just any Facebook Page).
+- **YouTube tags and language** (`YT_DEFAULT_LANGUAGE`,
+  `YT_DEFAULT_AUDIO_LANGUAGE`): caption generation now also returns
+  8-15 search tags per clip, set on the upload automatically, no config
+  needed. The language fields are opt-in via the two env vars above.
+- **Audience-informed posting window** (`AUDIENCE_WINDOW_ENABLED`,
+  `AUDIENCE_WINDOW_HOURS`): once a week the pipeline pulls Instagram's
+  `online_followers` insight (followers online per hour, averaged over
+  roughly the last month), finds the best contiguous window of the
+  day, and holds a due clip until that window opens. State persists at
+  `socialClips/posting_window.json` on the host. This needs the
+  account's insights permission and, per Meta, roughly 100+ followers
+  with some history before it returns real data; until then (or on any
+  API error) it logs why and posts whenever due, the pre-feature
+  behavior. A failed refresh retries at most once every 24 hours so a
+  missing permission doesn't turn into a wasted API call on every run.
 
 ### Rolling posting schedule
 
@@ -213,9 +275,17 @@ login root. Use that to correct `SFTP_BASE_PATH`, then set
    check the preview email.
 4. Flip `PUBLISH_ENABLED=true`, run once: YouTube post lands as private,
    Instagram Reel goes live on the test account, pair moves to `done/`.
-5. When satisfied, set `YT_PRIVACY_STATUS=public` for real visibility.
+5. `YT_PRIVACY_STATUS=public` is already set for real visibility.
 6. Regenerate `IG_APP_SECRET` in the Meta dashboard (it was exposed once
-   during setup) and update the env var.
+   during setup) and update the env var. Still outstanding.
+7. Once the pipeline points at the dojo's real Instagram account (not
+   the test account): set `IG_LOCATION_ID` to the dojo's Facebook
+   Places page ID (see the distribution features section above) and
+   confirm one manual run logs no "location tagging failed" line.
+8. On the same real account, confirm `AUDIENCE_WINDOW_ENABLED` finds a
+   window within the first week or two of runs (check the logs for
+   "Audience window refreshed"). The test account's low follower count
+   returns no data by design, that is expected and not a bug.
 
 ## Standing notes
 
